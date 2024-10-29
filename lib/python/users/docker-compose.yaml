@@ -1,0 +1,34 @@
+services:
+  users:
+    build: .
+    environment:
+      DBHOST: db
+      DBPASSWORD: admin01
+      DBUSER: root
+      DBNAME: appdb
+    networks:
+    - backnet
+    ports:
+    - 5000:5000
+    depends_on:
+      - db
+  db:
+    #image: mysql
+    build: db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: admin01
+      MYSQL_DATABASE: appdb
+    volumes:
+      - db-data:/var/lib/mysql:rw
+    #  - ./scripts:/docker-entrypoint-initdb.d/:rw
+    networks:
+      - backnet
+    expose:
+    - 3306
+    
+volumes:
+  db-data:
+
+networks:
+  backnet:

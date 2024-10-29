@@ -1,0 +1,30 @@
+{
+    "family": "webapp",
+        "networkMode": "awsvpc",
+        "containerDefinitions": [
+            {
+                "name": "http-server",
+                "image": "httpd:2.4",
+                "portMappings": [
+                    {
+                        "containerPort": 80,
+                        "hostPort": 80,
+                        "protocol": "tcp"
+                    }
+                ],
+                "essential": true,
+                "entryPoint": [
+                    "sh",
+                    "-c"
+                ],
+                "command": [
+                    "/bin/sh -c \"echo '<html> <head> <title>Amazon ECS Sample App</title><body> <h1>Amazon ECS Sample App</h1> <h2>Congratulations!</h2> <p>Your application is now running on a container in Amazon ECS.</p></body></html>' >  /usr/local/apache2/htdocs/index.html && httpd-foreground\""
+                ]
+            }
+        ],
+        "requiresCompatibilities": [
+            "FARGATE"
+        ],
+        "cpu": "256",
+        "memory": "512"
+}
