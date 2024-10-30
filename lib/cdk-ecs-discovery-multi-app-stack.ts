@@ -5,6 +5,9 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import {aws_servicediscovery as servicediscovery} from 'aws-cdk-lib';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as cloudfrontorigin from 'aws-cdk-lib/aws-cloudfront-origins';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as route53targets from 'aws-cdk-lib/aws-route53-targets';
 import { Construct } from 'constructs';
 
 export class CdkEcsDiscoveryStack extends Stack {
@@ -18,6 +21,31 @@ export class CdkEcsDiscoveryStack extends Stack {
       publicSubnetIds: ["subnet-54fd5a3d", "subnet-0752b87c"],
       availabilityZones: ["us-east-2a", "us-east-2b"]
     })
+
+    const eip = new ec2.CfnEIP(this, "natip", {
+      domain: "vpc"
+    })
+
+    const natGatewayProvider = new ec2.CfnNatGateway(this, "natgw", {
+      subnetId: "subnet-54fd5a3d",
+      allocationId: eip.attrAllocationId
+    });
+     
+    const egressRoute = new ec2.CfnRoute(this, "egressroute", {
+      routeTableId: "rtb-0b53f8ec58d611e0d",
+       destinationCidrBlock: "0.0.0.0/0",
+       natGatewayId: natGatewayProvider.attrNatGatewayId
+    })
+
+  const hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, "apiHostedZone", {
+    hostedZoneId: "Z0505228E4GIRALXYBJK",
+    zoneName: "api.onancloud.com"
+  });
+
+  const apiCertificate = new acm.Certificate(this, 'apicert', {
+    domainName: 'api.onancloud.com',
+    validation: acm.CertificateValidation.fromDns(hostedZone),
+  });
 
     const privatenamespace = new servicediscovery.PrivateDnsNamespace(this, 'privatedns', {
       name: 'foo.internal',
@@ -136,7 +164,14 @@ export class CdkEcsDiscoveryStack extends Stack {
     })
 
     const booksalb = new elbv2.ApplicationLoadBalancer(this, 'booksalb', { vpc, internetFacing: true });
-    const bookservicelistener = booksalb.addListener('httplistener', { port: 80 });
+    const bookservicelistener = booksalb.addListener('httplistener', 
+      { 
+        port: 443,
+        protocol: elbv2.ApplicationProtocol.HTTPS,
+        certificates: [apiCertificate]
+
+      }
+    );
 
     const booksTargetGroup = bookservicelistener.addTargets('bookservicetg', {
       port: 80,
@@ -146,8 +181,12 @@ export class CdkEcsDiscoveryStack extends Stack {
       })],
     });
 
-    
 
+    const booksalbrecord = new route53.ARecord(this, 'BooksARecord', {
+      zone: hostedZone,
+      recordName: "books",
+      target: route53.RecordTarget.fromAlias(new route53targets.LoadBalancerTarget(booksalb))
+    });
     //------------ User Service ----------------------------
 
     const userTaskdefintion = new ecs.FargateTaskDefinition(this, "userTaskdef", {
@@ -235,7 +274,13 @@ export class CdkEcsDiscoveryStack extends Stack {
     })
 
     const usersalb = new elbv2.ApplicationLoadBalancer(this, 'usersalb', { vpc, internetFacing: true });
-    const userservicelistener = usersalb.addListener('httplistener', { port: 80 });
+    const userservicelistener = usersalb.addListener('httplistener', 
+      { 
+        port: 443,
+        protocol: elbv2.ApplicationProtocol.HTTPS,
+        certificates: [apiCertificate]
+      }
+    );
 
     const usersTargetGroup = userservicelistener.addTargets('userservicetg', {
       port: 80,
@@ -245,15 +290,21 @@ export class CdkEcsDiscoveryStack extends Stack {
       })],
     });
 
+    const albuserrecord = new route53.ARecord(this, 'UsersARecord', {
+      zone: hostedZone,
+      recordName: "users",
+      target: route53.RecordTarget.fromAlias(new route53targets.LoadBalancerTarget(usersalb))
+    });
+
     const booksOrigin = new cloudfrontorigin.LoadBalancerV2Origin(booksalb, {
-      httpPort: 80,
+      httpPort: 443,
       originId: "books",
       originPath: "/books",
       protocolPolicy: cloudfront.OriginProtocolPolicy.MATCH_VIEWER
     })
 
     const usersOrigin = new cloudfrontorigin.LoadBalancerV2Origin(usersalb, {
-      httpPort: 80,
+      httpPort: 443,
       originId: "users",
       originPath: "/users",
       protocolPolicy: cloudfront.OriginProtocolPolicy.MATCH_VIEWER
@@ -261,10 +312,12 @@ export class CdkEcsDiscoveryStack extends Stack {
 
     const demodistribution = new cloudfront.Distribution(this, 'webdistribution', {
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
+      domainNames: ["api.onancloud.com"],
+      certificate: acm.Certificate.fromCertificateArn(this, "globalcert","arn:aws:acm:us-east-1:981504956772:certificate/9d5e8527-fbb4-44aa-8736-aede99a118c6"),
       defaultBehavior: {
         origin: booksOrigin,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.ALLOW_ALL
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.ALLOW_ALL,
       },
       additionalBehaviors: {
         '/books': {
@@ -279,5 +332,11 @@ export class CdkEcsDiscoveryStack extends Stack {
         }
       },
     });
+
+    const cloudfrontrecord = new route53.ARecord(this, 'CloudFrontARecord', {
+      zone: hostedZone,
+      target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(demodistribution))
+    });
+
   }
 }
