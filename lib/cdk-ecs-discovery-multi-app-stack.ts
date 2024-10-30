@@ -38,12 +38,17 @@ export class CdkEcsDiscoveryStack extends Stack {
     })
 
   const hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, "apiHostedZone", {
-    hostedZoneId: "Z0505228E4GIRALXYBJK",
+    hostedZoneId: "Z07809371UR6EWQL4LXY7",
     zoneName: "api.onancloud.com"
   });
 
-  const apiCertificate = new acm.Certificate(this, 'apicert', {
-    domainName: 'api.onancloud.com',
+  const booksCertificate = new acm.Certificate(this, 'booksapicert', {
+    domainName: 'books.api.onancloud.com',
+    validation: acm.CertificateValidation.fromDns(hostedZone),
+  });
+
+  const usersCertificate = new acm.Certificate(this, 'usersapicert', {
+    domainName: 'users.api.onancloud.com',
     validation: acm.CertificateValidation.fromDns(hostedZone),
   });
 
@@ -154,7 +159,8 @@ export class CdkEcsDiscoveryStack extends Stack {
       serviceName: "bookservice",
       vpcSubnets: vpc.selectSubnets({
         subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-      })
+      }),
+      enableExecuteCommand: true
     });
 
     booksEcsService.associateCloudMapService({
@@ -168,7 +174,7 @@ export class CdkEcsDiscoveryStack extends Stack {
       { 
         port: 443,
         protocol: elbv2.ApplicationProtocol.HTTPS,
-        certificates: [apiCertificate]
+        certificates: [booksCertificate]
 
       }
     );
@@ -203,6 +209,7 @@ export class CdkEcsDiscoveryStack extends Stack {
         }
       ],
       ephemeralStorageGiB: 25
+      //taskRole
     })
 
     const usersdb = userTaskdefintion.addContainer("usersDbContainerDef", {
@@ -264,7 +271,8 @@ export class CdkEcsDiscoveryStack extends Stack {
       serviceName: "userservice",
       vpcSubnets: vpc.selectSubnets({
         subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-      })
+      }),
+      enableExecuteCommand: true
     });
 
     usersEcsService.associateCloudMapService({
@@ -278,7 +286,7 @@ export class CdkEcsDiscoveryStack extends Stack {
       { 
         port: 443,
         protocol: elbv2.ApplicationProtocol.HTTPS,
-        certificates: [apiCertificate]
+        certificates: [usersCertificate]
       }
     );
 
@@ -296,24 +304,25 @@ export class CdkEcsDiscoveryStack extends Stack {
       target: route53.RecordTarget.fromAlias(new route53targets.LoadBalancerTarget(usersalb))
     });
 
-    const booksOrigin = new cloudfrontorigin.LoadBalancerV2Origin(booksalb, {
+    const booksOrigin = new cloudfrontorigin.HttpOrigin("books.api.onancloud.com", {
+      
       httpPort: 443,
       originId: "books",
-      originPath: "/books",
-      protocolPolicy: cloudfront.OriginProtocolPolicy.MATCH_VIEWER
+      //originPath: "/books",
+      protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY
     })
 
-    const usersOrigin = new cloudfrontorigin.LoadBalancerV2Origin(usersalb, {
+    const usersOrigin = new cloudfrontorigin.HttpOrigin("users.api.onancloud.com", {
       httpPort: 443,
       originId: "users",
-      originPath: "/users",
-      protocolPolicy: cloudfront.OriginProtocolPolicy.MATCH_VIEWER
+      //originPath: "/users",
+      protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY
     })
 
     const demodistribution = new cloudfront.Distribution(this, 'webdistribution', {
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       domainNames: ["api.onancloud.com"],
-      certificate: acm.Certificate.fromCertificateArn(this, "globalcert","arn:aws:acm:us-east-1:981504956772:certificate/9d5e8527-fbb4-44aa-8736-aede99a118c6"),
+      certificate: acm.Certificate.fromCertificateArn(this, "globalcert","arn:aws:acm:us-east-1:981504956772:certificate/8a18725c-d3d6-496c-94a9-65ecc645afa6"),
       defaultBehavior: {
         origin: booksOrigin,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
